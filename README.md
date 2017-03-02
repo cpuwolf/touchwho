@@ -1,7 +1,9 @@
 # touchwho
  touchwho is a program that monitor subfolder files in a folder
 
- touchwho 1.0 supports Linux only.
+ touchwho helps you follow who(file) has been touched
+
+ touchwho 2.0 supports Linux only.
 
  what will touchwho do?
 
