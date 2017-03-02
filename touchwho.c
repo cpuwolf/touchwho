@@ -27,6 +27,7 @@
 #include <dirent.h>
 #include <sys/inotify.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 
 #define TRUE 1
 #define FALSE 0
@@ -34,17 +35,27 @@
 
 static unsigned int is_exit = FALSE;
 static unsigned int total_num_files = 0;
+static unsigned int total_num_symlnk = 0;
 static unsigned int idx_file = 0;
+static unsigned int idx_symlnk = 0;
 static unsigned int touched_file = 0;
 static unsigned int ifd;
 
 struct wd_name {
 	int wd;
+	ino_t inode;
+	char * name;
+};
+
+struct sym_name {
+	ino_t inode;
 	char * name;
 };
 
 static struct wd_name *monitor_list = NULL;
 static int *wd_list = NULL;
+
+static struct sym_name *symlnk_list = NULL;
 
 typedef int (*fnmonhdl)(int, const char *);
 
@@ -180,6 +191,23 @@ static void monitor(int fd)
 		i = 0;
 	}
 }
+
+static ino_t symlnkpath(const char * path, const char * parentpath)
+{
+	char rlpath[PATH_MAX];
+	struct stat estat;
+	if(!realpath(path, rlpath))
+	{
+		/* skip non-existing path */
+		goto sys_error;
+	}
+	
+	if(lstat(rlpath, &estat) == 0) {
+		return estat.st_ino;
+	}
+sys_error:
+	return 0;
+}
 		
 static void traveldir(const char * dirname, fnmonhdl fnhdl, int fd)
 {
@@ -215,14 +243,39 @@ static void traveldir(const char * dirname, fnmonhdl fnhdl, int fd)
 				traveldir(path, fnhdl, fd);
 			}
 		} else {
+			struct stat estat;	
 			path_len = snprintf(path, PATH_MAX, "%s/%s", dirname, ename);
 			if(path_len >= PATH_MAX) {
 				fprintf(stderr, "file path length is too long\n");
 				exit(EXIT_FAILURE);
 			}
+#if 1
+			/* symbol link */
+			if(lstat(path, &estat) == 0) {
+				if(S_ISLNK(estat.st_mode)) {
+					if(fnhdl == NULL) {
+						//printf("=>%s 0x%x\n", path, entry->d_type);
+						total_num_symlnk ++;
+					} else {
+						symlnk_list[idx_symlnk].inode = symlnkpath(path, dirname);
+						symlnk_list[idx_symlnk].name = malloc(path_len+2);
+						strcpy(symlnk_list[idx_symlnk].name, path);
+						//printf("=>%s %d\n", path, symlnk_list[idx_symlnk].inode);
+						total_num_symlnk ++;
+						idx_symlnk++;
+					}
+					continue;
+				}
+			} else {
+				fprintf(stderr, "cannot lstat %s\n", path);
+				exit(EXIT_FAILURE);
+			}
+			/* symbol link */
+#endif
 			if(fnhdl == NULL) {
 				total_num_files ++;
 			} else {
+				monitor_list[idx_file].inode = entry->d_ino;
 				monitor_list[idx_file].name = malloc(path_len+2);
 				strcpy(monitor_list[idx_file].name, path);
 				//printf("%s\n", monitor_list[idx_file].name);
@@ -233,7 +286,6 @@ static void traveldir(const char * dirname, fnmonhdl fnhdl, int fd)
 			
 		}
 	}
-
 	if(closedir(d)) {
 		fprintf(stderr, "cannot close %s\n", dirname);
 		exit(EXIT_FAILURE);
@@ -250,7 +302,7 @@ void sig_handler(int sig)
 
 int main(int argc, char * argv[])
 {
-	int i,j;
+	int i,j,k;
 	char ofilename[512];
 	FILE *ofile;
 	char buf[1024];
@@ -258,7 +310,7 @@ int main(int argc, char * argv[])
 	
 	printf("%s", banner);
 	printf("Wei Shuai <cpuwolf@gmail.com> (C) 2016\n");
-	printf("Touchwho 1.0\nis a Folder Monitoring program\n\n");
+	printf("Touchwho 2.0\nis a Folder Monitoring program, help you find out who has been touched\n\n");
 
 	if(argc <=1) {
 		printf("Usage: Touchwho [folder path]\n\n");
@@ -274,23 +326,34 @@ int main(int argc, char * argv[])
 
 	scandir = argv[1];
 
-	printf("I'm trying to monitor folder: %s\n", scandir);
+	printf("Please wait! I have to scan folder: %s\n", scandir);
 
 	signal(SIGINT, sig_handler);
 
 	traveldir(scandir, NULL, 0);
-	printf("I found %u files in folder %s\n", total_num_files, scandir);
+	printf("-- found %u files\n", total_num_files);
+	printf("-- found %u symbol links\n", total_num_symlnk);
 	monitor_list = (struct wd_name *)malloc(total_num_files * sizeof(struct wd_name));
 	if( ! monitor_list) {
 		fprintf(stderr, "no memory left\n");
 		goto clean_up;
 	}
 	wd_list = (int *)malloc(total_num_files * sizeof(int));
+
+	symlnk_list = (struct sym_name *)malloc(total_num_symlnk * sizeof(struct sym_name));
+	if( ! symlnk_list) {
+		fprintf(stderr, "no memory left for symbol links\n");
+		goto clean_up;
+	}
 	
 	ifd = monitor_init();
 	traveldir(scandir, monitor_add, ifd);
+	/*debug*/
+	if(idx_file != total_num_files) {
+		fprintf(stderr, "\nmonitored %d files != found %d\n", idx_file, total_num_files);
+	}
 
-	printf("\nI'm ready to watch folder [%s], You can start now. press ctrl+c to exit\n", scandir);
+	printf("\nI'm watching folder [%s], You can start now. press ctrl+c to exit\n", scandir);
 	monitor(ifd);
 
 	printf("\nI found total %u/%u files are touched by some programs\n", touched_file, total_num_files);
@@ -300,6 +363,12 @@ int main(int argc, char * argv[])
 	for(i=0; (i<touched_file); i++) {
 		for(j=0; j<total_num_files; j++) {
 			if(wd_list[i] == monitor_list[j].wd) {
+				for(k=0; k<total_num_symlnk; k++) {
+					if(symlnk_list[k].inode == monitor_list[j].inode) {
+						sprintf(buf, "%s\n", symlnk_list[k].name);
+						fwrite(buf, 1, strlen(buf), ofile);
+					}
+				}
 				sprintf(buf, "%s\n", monitor_list[j].name);
 				//printf("[%d] %s\n", i, monitor_list[j].name);
 				percentage(i+1, touched_file);
@@ -307,6 +376,7 @@ int main(int argc, char * argv[])
 				break;
 			}
 		}
+		fflush(ofile);
 	}
 	printf("\nplease check file %s\n", ofilename);
 
@@ -318,6 +388,10 @@ clean_up:
 	}
 	free(monitor_list);
 	free(wd_list);
+	for(i=0; i< idx_symlnk; i++) {
+		free(symlnk_list[i].name);
+	}
+	free(symlnk_list);
 	close(ifd);
 	return 0;
 }
