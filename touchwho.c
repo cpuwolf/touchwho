@@ -1,5 +1,5 @@
 /*
-    touchwho is a program that monitor subfolder files in a folder
+    touchwho is a program that monitors subfolder files in a folder
     Copyright (C) 2016  Wei Shuai <cpuwolf@gmail.com>
 
     This program is free software: you can redistribute it and/or modify
@@ -147,7 +147,7 @@ static int monitor_add(int fd, const char *ename)
 	 		case EACCES:
 				break;
 			case ENOSPC:
-				fprintf(stderr, "\nplease enter below command:\necho %d > /proc/sys/fs/inotify/max_user_watches\n", total_num_files);
+				fprintf(stderr, "\nplease select a number xx greater than %d:\necho xx > /proc/sys/fs/inotify/max_user_watches\n", total_num_files);
 			default:
 				exit(EXIT_FAILURE);
 		}
