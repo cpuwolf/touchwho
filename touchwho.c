@@ -307,6 +307,7 @@ int main(int argc, char * argv[])
 	FILE *ofile;
 	char buf[1024];
 	char * scandir;
+	struct stat estat;
 	
 	printf("%s", banner);
 	printf("Wei Shuai <cpuwolf@gmail.com> (C) 2016\n");
@@ -325,8 +326,15 @@ int main(int argc, char * argv[])
 	}
 
 	scandir = argv[1];
+	
+	if(lstat(scandir, &estat) == 0) {
+		if(!S_ISDIR(estat.st_mode)) {
+			fprintf(stderr, "[%s] is not a folder\n", scandir);	
+			exit(EXIT_FAILURE);
+		}
+	}
 
-	printf("Please wait! I have to scan folder: %s\n", scandir);
+	printf("Please wait! I have to scan folder: [%s]\n", scandir);
 
 	signal(SIGINT, sig_handler);
 

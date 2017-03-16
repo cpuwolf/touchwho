@@ -18,7 +18,8 @@
 all: touchwho
 
 touchwho: touchwho.c
-	gcc -Wall --static -o touchwho $<
+	gcc -Wall -O2 --static -o touchwho $<
+	strip $@
 
 clean: touchwho
 	rm -rf $<
