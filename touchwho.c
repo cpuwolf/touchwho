@@ -37,6 +37,7 @@ static unsigned int is_exit = FALSE;
 static unsigned int total_num_files = 0;
 static unsigned int total_num_symlnk = 0;
 static unsigned int idx_file = 0;
+static unsigned int idx_mfile = 0;
 static unsigned int idx_symlnk = 0;
 static unsigned int touched_file = 0;
 static unsigned int ifd;
@@ -152,8 +153,8 @@ static int monitor_add(int fd, const char *ename)
 				exit(EXIT_FAILURE);
 		}
 	}
-	monitor_list[idx_file].wd = wd;
-	idx_file++;
+	monitor_list[idx_mfile].wd = wd;
+	idx_mfile++;
 	return wd;
 }
 
@@ -209,7 +210,7 @@ sys_error:
 	return 0;
 }
 		
-static void traveldir(const char * dirname, fnmonhdl fnhdl, int fd)
+static void traveldir(const char * dirname, int bcountonly)
 {
 	DIR * d;
 	int path_len;
@@ -240,7 +241,7 @@ static void traveldir(const char * dirname, fnmonhdl fnhdl, int fd)
 					fprintf(stderr, "dir path length is too long\n");
 					exit(EXIT_FAILURE);
 				}
-				traveldir(path, fnhdl, fd);
+				traveldir(path, bcountonly);
 			}
 		} else {
 			struct stat estat;	
@@ -253,7 +254,7 @@ static void traveldir(const char * dirname, fnmonhdl fnhdl, int fd)
 			/* symbol link */
 			if(lstat(path, &estat) == 0) {
 				if(S_ISLNK(estat.st_mode)) {
-					if(fnhdl == NULL) {
+					if(bcountonly) {
 						//printf("=>%s 0x%x\n", path, entry->d_type);
 						total_num_symlnk ++;
 					} else {
@@ -261,7 +262,7 @@ static void traveldir(const char * dirname, fnmonhdl fnhdl, int fd)
 						symlnk_list[idx_symlnk].name = malloc(path_len+2);
 						strcpy(symlnk_list[idx_symlnk].name, path);
 						//printf("=>%s %d\n", path, symlnk_list[idx_symlnk].inode);
-						total_num_symlnk ++;
+						//total_num_symlnk ++;
 						idx_symlnk++;
 					}
 					continue;
@@ -272,16 +273,15 @@ static void traveldir(const char * dirname, fnmonhdl fnhdl, int fd)
 			}
 			/* symbol link */
 #endif
-			if(fnhdl == NULL) {
+			if(bcountonly) {
 				total_num_files ++;
 			} else {
 				monitor_list[idx_file].inode = entry->d_ino;
 				monitor_list[idx_file].name = malloc(path_len+2);
 				strcpy(monitor_list[idx_file].name, path);
 				//printf("%s\n", monitor_list[idx_file].name);
-				//printf("*");
+				idx_file++;
 				progress(idx_file);
-				fnhdl(fd, monitor_list[idx_file].name);
 			}
 			
 		}
@@ -310,8 +310,8 @@ int main(int argc, char * argv[])
 	struct stat estat;
 	
 	printf("%s", banner);
-	printf("Wei Shuai <cpuwolf@gmail.com> (C) 2016\n");
-	printf("Touchwho 2.0\nis a Folder Monitoring program, help you find out who has been touched\n\n");
+	printf("Wei Shuai <cpuwolf@gmail.com> (C) 2016-2018\n");
+	printf("Touchwho 2.1\nis a Folder Monitoring program, help you find out who has been touched\n\n");
 
 	if(argc <=1) {
 		printf("Usage: Touchwho [folder path]\n\n");
@@ -338,7 +338,8 @@ int main(int argc, char * argv[])
 
 	signal(SIGINT, sig_handler);
 
-	traveldir(scandir, NULL, 0);
+	traveldir(scandir, 1);
+
 	printf("-- found %u files\n", total_num_files);
 	printf("-- found %u symbol links\n", total_num_symlnk);
 	monitor_list = (struct wd_name *)malloc(total_num_files * sizeof(struct wd_name));
@@ -355,7 +356,10 @@ int main(int argc, char * argv[])
 	}
 	
 	ifd = monitor_init();
-	traveldir(scandir, monitor_add, ifd);
+	traveldir(scandir, 0);
+	for(j=0; j<total_num_files; j++) {
+		monitor_add(ifd, monitor_list[j].name);
+	}
 	/*debug*/
 	if(idx_file != total_num_files) {
 		fprintf(stderr, "\nmonitored %d files != found %d\n", idx_file, total_num_files);
