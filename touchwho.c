@@ -28,6 +28,7 @@
 #include <sys/inotify.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
 #define TRUE 1
 #define FALSE 0
@@ -107,7 +108,7 @@ static void progress(int idx)
 	fprintf(stderr, "%c\r", pic[idx%4]);
 }
 
-void create_file_name(char * fname)
+void create_file_name(char * fname, int idx)
 {
         time_t tt;
         struct tm *t;
@@ -115,8 +116,8 @@ void create_file_name(char * fname)
 
         tt = time(NULL);
         t = localtime(&tt);
-        sprintf(timestr, "touchwho_filelist_%04d_%02d_%02d_%02d%02d%02d.txt", t->tm_year+1900, t->tm_mon+1, t->tm_mday,
-                t->tm_hour, t->tm_min, t->tm_sec);
+        sprintf(timestr, "touchwho_filelist_%04d_%02d_%02d_%02d%02d%02d_%d.txt", t->tm_year+1900, t->tm_mon+1, t->tm_mday,
+                t->tm_hour, t->tm_min, t->tm_sec, idx);
         strcpy(fname, timestr);
 }
 
@@ -132,7 +133,7 @@ static int monitor_init()
 	return fd;
 }
 
-static int monitor_add(int fd, const char *ename)
+static int monitor_add(int fd, struct wd_name * mlist, const char *ename)
 {
 	int wd;
 	
@@ -153,7 +154,7 @@ static int monitor_add(int fd, const char *ename)
 				exit(EXIT_FAILURE);
 		}
 	}
-	monitor_list[idx_mfile].wd = wd;
+	mlist[idx_mfile].wd = wd;
 	idx_mfile++;
 	return wd;
 }
@@ -311,19 +312,13 @@ int main(int argc, char * argv[])
 	
 	printf("%s", banner);
 	printf("Wei Shuai <cpuwolf@gmail.com> (C) 2016-2018\n");
-	printf("Touchwho 2.1\nis a Folder Monitoring program, help you find out who has been touched\n\n");
+	printf("Touchwho 3.0\nis a Folder Monitoring program, help you find out who has been touched\n\n");
 
 	if(argc <=1) {
 		printf("Usage: Touchwho [folder path]\n\n");
 		return -1;
 	}
 
-	create_file_name(ofilename);
-	ofile = fopen(ofilename, "wb+");
-	if(!ofile) {
-		fprintf(stderr, "cannot create log file %s\n", ofilename);	
-		exit(EXIT_FAILURE);
-	}
 
 	scandir = argv[1];
 	
@@ -347,7 +342,6 @@ int main(int argc, char * argv[])
 		fprintf(stderr, "no memory left\n");
 		goto clean_up;
 	}
-	wd_list = (int *)malloc(total_num_files * sizeof(int));
 
 	symlnk_list = (struct sym_name *)malloc(total_num_symlnk * sizeof(struct sym_name));
 	if( ! symlnk_list) {
@@ -355,33 +349,80 @@ int main(int argc, char * argv[])
 		goto clean_up;
 	}
 	
-	ifd = monitor_init();
 	traveldir(scandir, 0);
-	for(j=0; j<total_num_files; j++) {
-		monitor_add(ifd, monitor_list[j].name);
+#if 1
+	pid_t pid;
+	unsigned int num_child = 4;
+	unsigned int num_divider = (total_num_files/num_child)+((total_num_files%num_child)?1:0);
+	unsigned int job_num = num_divider;
+	int left_num_files = total_num_files;
+	struct wd_name *mon_list = monitor_list;
+	/* Start fork */
+	for (i = 0; i < num_child; ++i) {
+		mon_list = monitor_list + (i * num_divider);
+		if((pid = fork()) < 0) {
+				perror("fork");
+				abort();
+		} else if(pid == 0) {
+			if(left_num_files < job_num) {
+				job_num = left_num_files;
+			}
+			/* child work */
+			goto childwork;
+		}
+		/* father work */
+		left_num_files -= num_divider;
+	}
+	wait(NULL);
+	goto clean_up;
+
+childwork:
+	wd_list = (int *)malloc(total_num_files * sizeof(int));
+	create_file_name(ofilename, i);
+	ofile = fopen(ofilename, "wb+");
+	if(!ofile) {
+		fprintf(stderr, "cannot create log file %s\n", ofilename);
+		exit(EXIT_FAILURE);
+	}
+	ifd = monitor_init();
+	printf("child[%d] task:%d %d\n", getpid(), job_num, ifd);
+#else
+	unsigned int job_num = total_num_files;
+	struct wd_name *mon_list = monitor_list;
+	wd_list = (int *)malloc(total_num_files * sizeof(int));
+	create_file_name(ofilename, 999);
+	ofile = fopen(ofilename, "wb+");
+	if(!ofile) {
+		fprintf(stderr, "cannot create log file %s\n", ofilename);
+		exit(EXIT_FAILURE);
+	}
+	ifd = monitor_init();
+#endif
+	for(j=0; j<job_num; j++) {
+		monitor_add(ifd, mon_list, mon_list[j].name);
 	}
 	/*debug*/
-	if(idx_file != total_num_files) {
-		fprintf(stderr, "\nmonitored %d files != found %d\n", idx_file, total_num_files);
+	if(idx_file != job_num) {
+		fprintf(stderr, "\nmonitored %d files != found %d\n", idx_file, job_num);
 	}
 
 	printf("\nI'm watching folder [%s], You can start now. press ctrl+c to exit\n", scandir);
 	monitor(ifd);
 
-	printf("\nI found total %u/%u files are touched by some programs\n", touched_file, total_num_files);
+	printf("\nI found total %u/%u files are touched by some programs\n", touched_file, job_num);
 
 	printf("\nI'm writing to file %s\n", ofilename);
 
 	for(i=0; (i<touched_file); i++) {
-		for(j=0; j<total_num_files; j++) {
-			if(wd_list[i] == monitor_list[j].wd) {
+		for(j=0; j<job_num; j++) {
+			if(wd_list[i] == mon_list[j].wd) {
 				for(k=0; k<total_num_symlnk; k++) {
-					if(symlnk_list[k].inode == monitor_list[j].inode) {
+					if(symlnk_list[k].inode == mon_list[j].inode) {
 						sprintf(buf, "%s\n", symlnk_list[k].name);
 						fwrite(buf, 1, strlen(buf), ofile);
 					}
 				}
-				sprintf(buf, "%s\n", monitor_list[j].name);
+				sprintf(buf, "%s\n", mon_list[j].name);
 				//printf("[%d] %s\n", i, monitor_list[j].name);
 				percentage(i+1, touched_file);
 				fwrite(buf, 1, strlen(buf), ofile);
@@ -392,14 +433,15 @@ int main(int argc, char * argv[])
 	}
 	printf("\nplease check file %s\n", ofilename);
 
-clean_up:
 	fclose(ofile);
+	free(wd_list);
+	exit(0);
+clean_up:
 	/* free all memory */
 	for(i=0; i< idx_file; i++) {
 		free(monitor_list[i].name);
 	}
 	free(monitor_list);
-	free(wd_list);
 	for(i=0; i< idx_symlnk; i++) {
 		free(symlnk_list[i].name);
 	}
