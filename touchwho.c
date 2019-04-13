@@ -310,11 +310,11 @@ int main(int argc, char * argv[])
 	struct stat estat;
 	
 	printf("%s", banner);
-	printf("Wei Shuai <cpuwolf@gmail.com> (C) 2016-2018\n");
-	printf("Touchwho 2.1\nis a Folder Monitoring program, help you find out who has been touched\n\n");
+	printf("Wei Shuai <cpuwolf@gmail.com> (C) 2016-2019\n");
+	printf("Touchwho 3.0\nis a Folder Monitoring program, help you find out who has been touched\n\n");
 
 	if(argc <=1) {
-		printf("Usage: Touchwho [folder path]\n\n");
+		printf("Usage: Touchwho [folder path] [folder path] [...]\n\n");
 		return -1;
 	}
 
@@ -325,20 +325,22 @@ int main(int argc, char * argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	scandir = argv[1];
-	
-	if(lstat(scandir, &estat) == 0) {
-		if(!S_ISDIR(estat.st_mode)) {
-			fprintf(stderr, "[%s] is not a folder\n", scandir);	
-			exit(EXIT_FAILURE);
-		}
-	}
-
-	printf("Please wait! I have to scan folder: [%s]\n", scandir);
-
 	signal(SIGINT, sig_handler);
 
-	traveldir(scandir, 1);
+	for(i=1; i < argc; i++) {
+		scandir = argv[i];
+		
+		if(lstat(scandir, &estat) == 0) {
+			if(!S_ISDIR(estat.st_mode)) {
+				fprintf(stderr, "[%s] is not a folder\n", scandir);	
+				exit(EXIT_FAILURE);
+			}
+		}
+
+		printf("Please wait! I have to scan folder: [%s]\n", scandir);
+
+		traveldir(scandir, 1);
+	}
 
 	printf("-- found %u files\n", total_num_files);
 	printf("-- found %u symbol links\n", total_num_symlnk);
@@ -356,7 +358,12 @@ int main(int argc, char * argv[])
 	}
 	
 	ifd = monitor_init();
-	traveldir(scandir, 0);
+
+	for(i=1; i < argc; i++) {
+		scandir = argv[i];
+		traveldir(scandir, 0);
+	}
+	
 	for(j=0; j<total_num_files; j++) {
 		monitor_add(ifd, monitor_list[j].name);
 	}
