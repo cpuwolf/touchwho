@@ -372,7 +372,12 @@ int main(int argc, char * argv[])
 		fprintf(stderr, "\nmonitored %d files != found %d\n", idx_file, total_num_files);
 	}
 
-	printf("\nI'm watching folder [%s], You can start now. press ctrl+c to exit\n", scandir);
+	printf("\nI'm watching folder: ");
+	for(i=1; i < argc; i++) {
+		scandir = argv[i];
+		printf("[%s] ", scandir);
+	}
+	printf(", You can start now. press ctrl+c to exit\n");
 	monitor(ifd);
 
 	printf("\nI found total %u/%u files are touched by some programs\n", touched_file, total_num_files);
